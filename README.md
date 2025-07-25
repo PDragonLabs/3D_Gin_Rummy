@@ -2,7 +2,7 @@
 3D Gin Rummy
 
 
-Screenshot 2025-07-25 at 13-14-05 3D Gin Rummy.png
+[scr sht](Screenshot 2025-07-25 at 13-14-05 3D Gin Rummy.png)
 
 
 3D Gin Rummy
