@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Gin Rummy</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+            background: radial-gradient(ellipse at center, #4a5568 0%, #1a202c 70%);
+            color: #fff;
+        }
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        canvas {
+            display: block;
+        }
+        #ui-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .hand-container {
+            width: 100%;
+            height: 240px; /* Increased height for better visibility */
+        }
+        #computer-hand {
+            transform: rotate(180deg);
+        }
+        #game-controls {
+            pointer-events: auto;
+            display: flex;
+            gap: 20px;
+            padding: 12px;
+            background: rgba(26, 32, 44, 0.6);
+            border-radius: 15px;
+            margin-bottom: 240px; /* Adjusted position */
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.37);
+        }
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: 600;
+            color: #edf2f7;
+            background: linear-gradient(145deg, #4a5568, #2d3748);
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            transition: all 0.3s ease;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+        }
+        button:hover:not(:disabled) {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+            background: linear-gradient(145deg, #5a6578, #3d4758);
+            filter: brightness(1.1);
+        }
+        button:disabled {
+            cursor: not-allowed;
+            opacity: 0.4;
+        }
+        #knock-btn {
+            background: linear-gradient(145deg, #c53030, #9b2c2c);
+        }
+        #knock-btn:hover:not(:disabled) {
+            background: linear-gradient(145deg, #e53e3e, #c53030);
+        }
+        #message-box {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 25px 45px;
+            background: rgba(26, 32, 44, 0.75);
+            color: white;
+            border-radius: 15px;
+            font-size: 24px;
+            text-align: center;
+            z-index: 100;
+            display: none;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.37);
+        }
+        #score-box {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(26, 32, 44, 0.6);
+            padding: 12px 18px;
+            border-radius: 12px;
+            font-size: 16px;
+            line-height: 1.6;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.37);
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="ui-container">
+            <div id="score-box">
+                <div>Player Score: <span id="player-score">0</span></div>
+                <div>Computer Score: <span id="computer-score">0</span></div>
+            </div>
+            <div class="hand-container" id="computer-hand"></div>
+            <div id="game-controls">
+                <button id="draw-deck-btn">Draw from Deck</button>
+                <button id="draw-discard-btn">Draw from Discard</button>
+                <button id="knock-btn" style="display: none;">Knock</button>
+            </div>
+            <div class="hand-container" id="player-hand"></div>
+        </div>
+        <div id="message-box"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/@tweenjs/tween.js@18.6.4/dist/tween.umd.js"></script>
+    <script>
+        // --- THREE.js Setup ---
+        let scene, camera, renderer;
+        let playerHandGroup, computerHandGroup, deckGroup, discardPileGroup;
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        // --- Game State ---
+        let deck = [];
+        let playerHand = [];
+        let computerHand = [];
+        let discardPile = [];
+        let isPlayerTurn = true;
+        let playerHasDrawn = false;
+        let playerScore = 0;
+        let computerScore = 0;
+        
+        // --- Drag and Drop State ---
+        let draggedCard = null;
+        let isDragging = false;
+        let hasDragged = false;
+        const dragPlane = new THREE.Plane();
+        const dragIntersection = new THREE.Vector3();
+        const mouseDownPos = new THREE.Vector2();
+
+
+        const CARD_WIDTH = 3.5;
+        const CARD_HEIGHT = 5;
+        const CARD_DEPTH = 0.1;
+        const TABLE_Y = -CARD_HEIGHT * 1.5;
+
+        // --- UI Elements ---
+        const drawDeckBtn = document.getElementById('draw-deck-btn');
+        const drawDiscardBtn = document.getElementById('draw-discard-btn');
+        const knockBtn = document.getElementById('knock-btn');
+        const messageBox = document.getElementById('message-box');
+        const playerScoreEl = document.getElementById('player-score');
+        const computerScoreEl = document.getElementById('computer-score');
+
+        // --- Initialization ---
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a202c);
+
+            // Camera - Final adjustment for clear visibility
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 30, 32); // Raised camera and pulled back
+            camera.lookAt(0, 0, 0); // Look at the center of the table
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setClearColor(0x000000, 0);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.getElementById('container').appendChild(renderer.domElement);
+
+            // Lighting
+            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.7);
+            directionalLight.position.set(10, 20, 15);
+            directionalLight.castShadow = true;
+            scene.add(directionalLight);
+            
+            const spotLight = new THREE.SpotLight(0xffffff, 0.9, 120, Math.PI / 6, 0.5, 2);
+            spotLight.position.set(0, 40, 0);
+            spotLight.castShadow = true;
+            scene.add(spotLight);
+
+            // Table with felt texture
+            const tableGeometry = new THREE.PlaneGeometry(80, 60);
+            const tableMaterial = new THREE.MeshStandardMaterial({ 
+                map: createFeltTexture(), 
+                roughness: 0.9,
+                metalness: 0.1
+            });
+            const table = new THREE.Mesh(tableGeometry, tableMaterial);
+            table.receiveShadow = true;
+            table.rotation.x = -Math.PI / 2;
+            table.position.y = TABLE_Y;
+            scene.add(table);
+
+            // Card Groups
+            playerHandGroup = new THREE.Group();
+            scene.add(playerHandGroup);
+            computerHandGroup = new THREE.Group();
+            scene.add(computerHandGroup);
+            deckGroup = new THREE.Group();
+            scene.add(deckGroup);
+            discardPileGroup = new THREE.Group();
+            scene.add(discardPileGroup);
+
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize, false);
+            window.addEventListener('mousedown', onMouseDown, false);
+            window.addEventListener('mousemove', onMouseMove, false);
+            window.addEventListener('mouseup', onMouseUp, false);
+            drawDeckBtn.addEventListener('click', playerDrawFromDeck);
+            drawDiscardBtn.addEventListener('click', playerDrawFromDiscard);
+            knockBtn.addEventListener('click', playerKnock);
+
+            // Start Game
+            startGame();
+            animate();
+        }
+
+        // --- Game Logic ---
+        function startGame() {
+            resetGameTable();
+            deck = createDeck();
+            shuffleDeck(deck);
+            dealCards();
+            updateUI();
+            showMessage("Your turn. Draw a card.", 2000);
+        }
+
+        function resetGameTable() {
+            [playerHand, computerHand, discardPile, deck] = [[], [], [], []];
+            [playerHandGroup, computerHandGroup, deckGroup, discardPileGroup].forEach(group => {
+                while(group.children.length > 0) {
+                    group.remove(group.children[0]);
+                }
+            });
+            playerHasDrawn = false;
+            isPlayerTurn = true;
+            knockBtn.style.display = 'none';
+        }
+
+        function createDeck() {
+            const suits = ['♠', '♥', '♦', '♣'];
+            const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+            const newDeck = [];
+            for (const suit of suits) {
+                for (const rank of ranks) {
+                    newDeck.push({ suit, rank, value: getCardValue(rank), id: `${rank}${suit}` });
+                }
+            }
+            return newDeck;
+        }
+
+        function shuffleDeck(d) {
+            for (let i = d.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [d[i], d[j]] = [d[j], d[i]];
+            }
+        }
+
+        function dealCards() {
+            for (let i = 0; i < 10; i++) {
+                addCardToHand(playerHand, deck.pop(), playerHandGroup, false);
+                addCardToHand(computerHand, deck.pop(), computerHandGroup, true);
+            }
+            const firstDiscard = deck.pop();
+            addCardToDiscard(firstDiscard, false);
+            deck.forEach((cardData, i) => {
+                const cardMesh = createCardMesh(cardData, true);
+                cardMesh.position.set(6, TABLE_Y + CARD_DEPTH * (i + 1), 0);
+                cardMesh.rotation.x = -Math.PI / 2;
+                deckGroup.add(cardMesh);
+            });
+            reorganizeHand(playerHand, playerHandGroup, false);
+            reorganizeHand(computerHand, computerHandGroup, true);
+        }
+
+        function getCardValue(rank) {
+            if (['J', 'Q', 'K'].includes(rank)) return 10;
+            if (rank === 'A') return 1;
+            return parseInt(rank);
+        }
+
+        function addCardToHand(hand, cardData, group, isComputer) {
+            hand.push(cardData);
+            const cardMesh = createCardMesh(cardData, isComputer);
+            group.add(cardMesh);
+        }
+
+        function addCardToDiscard(cardData, animate = false, fromGroup = null, onComplete = null) {
+            discardPile.push(cardData);
+            const cardMesh = createCardMesh(cardData, false);
+            cardMesh.position.set(-6, TABLE_Y + CARD_DEPTH * discardPile.length, 0);
+            cardMesh.rotation.x = -Math.PI / 2;
+            discardPileGroup.add(cardMesh);
+        }
+
+        function playerDrawFromDeck() {
+            if (!isPlayerTurn || playerHasDrawn) return;
+            if (deck.length === 0) restockDeck();
+            
+            const cardData = deck.pop();
+            deckGroup.remove(deckGroup.children[deckGroup.children.length - 1]);
+            addCardToHand(playerHand, cardData, playerHandGroup, false);
+            reorganizeHand(playerHand, playerHandGroup, false);
+            
+            playerHasDrawn = true;
+            updateUI();
+            showMessage("Select a card to discard.", 2000);
+        }
+
+        function playerDrawFromDiscard() {
+            if (!isPlayerTurn || playerHasDrawn || discardPile.length === 0) return;
+
+            const cardData = discardPile.pop();
+            discardPileGroup.remove(discardPileGroup.children[discardPileGroup.children.length - 1]);
+            addCardToHand(playerHand, cardData, playerHandGroup, false);
+            reorganizeHand(playerHand, playerHandGroup, false);
+            
+            playerHasDrawn = true;
+            updateUI();
+            showMessage("Select a card to discard.", 2000);
+        }
+
+        function playerDiscard(cardMesh) {
+            if (!isPlayerTurn || !playerHasDrawn) return;
+            
+            const cardIndex = playerHand.findIndex(c => c.id === cardMesh.userData.id);
+            if (cardIndex === -1) return;
+
+            // Animate the card moving to the discard pile
+            const [cardData] = playerHand.splice(cardIndex, 1);
+            discardPile.push(cardData);
+            
+            const targetPosition = new THREE.Vector3(-6, TABLE_Y + CARD_DEPTH * discardPile.length, 0);
+            const targetRotation = new THREE.Euler(-Math.PI / 2, 0, 0);
+
+            new TWEEN.Tween(cardMesh.position)
+                .to(targetPosition, 500)
+                .easing(TWEEN.Easing.Quadratic.Out)
+                .start();
+
+            new TWEEN.Tween(cardMesh.rotation)
+                .to({ x: targetRotation.x, y: targetRotation.y, z: targetRotation.z }, 500)
+                .easing(TWEEN.Easing.Quadratic.Out)
+                .onComplete(() => {
+                    playerHandGroup.remove(cardMesh);
+                    discardPileGroup.add(cardMesh);
+                    reorganizeHand(playerHand, playerHandGroup, false, false);
+
+                    playerHasDrawn = false;
+                    isPlayerTurn = false;
+                    updateUI();
+                    setTimeout(computerTurn, 1000);
+                })
+                .start();
+        }
+        
+        function restockDeck() {
+            if (discardPile.length <= 1) return;
+            const topCard = discardPile.pop();
+            const topCardMesh = discardPileGroup.children[discardPileGroup.children.length - 1];
+
+            deck = discardPile.slice();
+            shuffleDeck(deck);
+            discardPile = [topCard];
+
+            while(deckGroup.children.length > 0) deckGroup.remove(deckGroup.children[0]);
+            while(discardPileGroup.children.length > 1) discardPileGroup.remove(discardPileGroup.children[0]);
+            
+            deck.forEach((cardData, i) => {
+                const cardMesh = createCardMesh(cardData, true);
+                cardMesh.position.set(6, TABLE_Y + CARD_DEPTH * (i + 1), 0);
+                cardMesh.rotation.x = -Math.PI / 2;
+                deckGroup.add(cardMesh);
+            });
+        }
+
+        function computerTurn() {
+            showMessage("Computer's turn...", 1500);
+            
+            setTimeout(() => {
+                // --- Computer Draw Logic ---
+                const { deadwoodValue } = analyzeHand(computerHand);
+                const topDiscard = discardPile[discardPile.length - 1];
+                let drewFromDiscard = false;
+
+                if (topDiscard) {
+                    const potentialHand = [...computerHand, topDiscard];
+                    const { deadwoodValue: potentialDeadwood } = analyzeHand(potentialHand);
+                    if (potentialDeadwood < deadwoodValue) {
+                        const cardData = discardPile.pop();
+                        discardPileGroup.remove(discardPileGroup.children[discardPileGroup.children.length - 1]);
+                        addCardToHand(computerHand, cardData, computerHandGroup, true);
+                        drewFromDiscard = true;
+                    }
+                }
+                
+                if (!drewFromDiscard) {
+                    if (deck.length === 0) restockDeck();
+                    const cardData = deck.pop();
+                    if (cardData) {
+                        deckGroup.remove(deckGroup.children[deckGroup.children.length - 1]);
+                        addCardToHand(computerHand, cardData, computerHandGroup, true);
+                    }
+                }
+                reorganizeHand(computerHand, computerHandGroup, true);
+
+                // --- Computer Discard Logic (with animation) ---
+                setTimeout(() => {
+                    const { deadwood: newDeadwood } = analyzeHand(computerHand);
+                    let cardToDiscard;
+                    if (newDeadwood.length > 0) {
+                        cardToDiscard = newDeadwood.sort((a, b) => b.value - a.value)[0];
+                    } else {
+                        cardToDiscard = computerHand.sort((a,b) => b.value - a.value)[0];
+                    }
+
+                    const cardIndex = computerHand.findIndex(c => c.id === cardToDiscard.id);
+                    const [cardData] = computerHand.splice(cardIndex, 1);
+                    const cardMesh = computerHandGroup.children.find(m => m.userData.id === cardData.id);
+                    
+                    if (!cardMesh) { // Safety check
+                        endComputerTurn();
+                        return;
+                    }
+
+                    discardPile.push(cardData);
+                    const targetPosition = new THREE.Vector3(-6, TABLE_Y + CARD_DEPTH * discardPile.length, 0);
+                    const targetRotation = new THREE.Euler(-Math.PI / 2, 0, 0);
+
+                    new TWEEN.Tween(cardMesh.position)
+                        .to(targetPosition, 750)
+                        .easing(TWEEN.Easing.Quadratic.Out)
+                        .start();
+
+                    new TWEEN.Tween(cardMesh.rotation)
+                        .to({ x: targetRotation.x, y: targetRotation.y, z: targetRotation.z }, 750)
+                        .easing(TWEEN.Easing.Quadratic.Out)
+                        .onStart(() => {
+                            // Reveal the card's face as it starts moving
+                            cardMesh.material[4] = createCardFaceMaterial(cardData);
+                        })
+                        .onComplete(() => {
+                            computerHandGroup.remove(cardMesh);
+                            discardPileGroup.add(cardMesh);
+                            reorganizeHand(computerHand, computerHandGroup, true);
+                            endComputerTurn();
+                        })
+                        .start();
+                }, 1000); // "Thinking" time
+            }, 1500);
+        }
+
+        function endComputerTurn() {
+            const { deadwoodValue } = analyzeHand(computerHand);
+            if (deadwoodValue === 0) {
+                endRound("Computer goes Gin!");
+                return;
+            } else if (deadwoodValue <= 10) {
+                endRound("Computer knocks.");
+                return;
+            }
+
+            isPlayerTurn = true;
+            playerHasDrawn = false;
+            updateUI();
+            showMessage("Your turn. Draw a card.", 2000);
+        }
+        
+        function playerKnock() {
+            const { deadwoodValue } = analyzeHand(playerHand);
+            if (deadwoodValue > 10) {
+                showMessage("You cannot knock with more than 10 deadwood points.", 2500);
+                return;
+            }
+            endRound("Player knocks.");
+        }
+
+        function analyzeHand(hand) {
+            let unmeldedCards = [...hand];
+            const melds = [];
+            const ranks = {};
+            unmeldedCards.forEach(card => {
+                ranks[card.rank] = ranks[card.rank] || [];
+                ranks[card.rank].push(card);
+            });
+            for (const rank in ranks) {
+                if (ranks[rank].length >= 3) {
+                    melds.push(ranks[rank]);
+                    unmeldedCards = unmeldedCards.filter(card => card.rank !== rank);
+                }
+            }
+            const suits = {};
+            unmeldedCards.forEach(card => {
+                suits[card.suit] = suits[card.suit] || [];
+                suits[card.suit].push(card);
+            });
+            const rankOrder = 'A23456789TJQK'.replace('T', '10');
+            for (const suit in suits) {
+                const suitCards = suits[suit].sort((a, b) => rankOrder.indexOf(a.rank) - rankOrder.indexOf(b.rank));
+                if (suitCards.length < 3) continue;
+                let currentRun = [];
+                for (let i = 0; i < suitCards.length; i++) {
+                    if (currentRun.length === 0) {
+                        currentRun.push(suitCards[i]);
+                    } else {
+                        const lastCard = currentRun[currentRun.length - 1];
+                        if (rankOrder.indexOf(suitCards[i].rank) === rankOrder.indexOf(lastCard.rank) + 1) {
+                            currentRun.push(suitCards[i]);
+                        } else {
+                            if (currentRun.length >= 3) {
+                                melds.push(currentRun);
+                                unmeldedCards = unmeldedCards.filter(card => !currentRun.find(rc => rc.id === card.id));
+                            }
+                            currentRun = [suitCards[i]];
+                        }
+                    }
+                }
+                if (currentRun.length >= 3) {
+                    melds.push(currentRun);
+                    unmeldedCards = unmeldedCards.filter(card => !currentRun.find(rc => rc.id === card.id));
+                }
+            }
+            const deadwood = unmeldedCards;
+            const deadwoodValue = deadwood.reduce((sum, card) => sum + card.value, 0);
+            return { melds, deadwood, deadwoodValue };
+        }
+
+        function endRound(reason) {
+            showMessage(reason, 3000);
+            isPlayerTurn = false;
+            playerHasDrawn = true; 
+            updateUI();
+            const playerAnalysis = analyzeHand(playerHand);
+            const computerAnalysis = analyzeHand(computerHand);
+            // Flip all computer cards face up
+            computerHandGroup.children.forEach((cardMesh) => {
+                cardMesh.material[4] = createCardFaceMaterial(cardMesh.userData);
+            });
+            reorganizeHand(computerHand, computerHandGroup, false); // Reorganize to show them flat
+            let roundPlayerScore = 0;
+            let roundComputerScore = 0;
+            if (reason.includes("Player")) {
+                if (playerAnalysis.deadwoodValue < computerAnalysis.deadwoodValue) {
+                    roundPlayerScore = computerAnalysis.deadwoodValue - playerAnalysis.deadwoodValue;
+                    if (playerAnalysis.deadwoodValue === 0) roundPlayerScore += 25; // Gin bonus
+                } else {
+                    roundComputerScore = playerAnalysis.deadwoodValue - computerAnalysis.deadwoodValue + 25; // Undercut bonus
+                }
+            } else { // Computer knocked or went Gin
+                if (computerAnalysis.deadwoodValue < playerAnalysis.deadwoodValue) {
+                    roundComputerScore = playerAnalysis.deadwoodValue - computerAnalysis.deadwoodValue;
+                    if (computerAnalysis.deadwoodValue === 0) roundComputerScore += 25; // Gin bonus
+                } else {
+                    roundPlayerScore = computerAnalysis.deadwoodValue - playerAnalysis.deadwoodValue + 25; // Undercut bonus
+                }
+            }
+            playerScore += roundPlayerScore;
+            computerScore += roundComputerScore;
+            updateScoreboard();
+            setTimeout(() => {
+                let summary = `${reason}<br><br>Player Deadwood: ${playerAnalysis.deadwoodValue}<br>Computer Deadwood: ${computerAnalysis.deadwoodValue}<br><br>`;
+                if(roundPlayerScore > 0) summary += `Player scores ${roundPlayerScore} points.`;
+                if(roundComputerScore > 0) summary += `Computer scores ${roundComputerScore} points.`;
+                showMessage(summary, 5000);
+                setTimeout(startGame, 6000);
+            }, 4000);
+        }
+
+        // --- UI and Visuals ---
+        function createFeltTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 512;
+            const context = canvas.getContext('2d');
+            context.fillStyle = '#004d00';
+            context.fillRect(0, 0, 512, 512);
+            for (let i = 0; i < 10000; i++) {
+                const x = Math.random() * 512;
+                const y = Math.random() * 512;
+                const alpha = Math.random() * 0.15;
+                context.fillStyle = `rgba(0,0,0,${alpha})`;
+                context.fillRect(x, y, 2, 2);
+            }
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        function createCardMesh(cardData, isFaceDown) {
+            const geometry = new THREE.BoxGeometry(CARD_WIDTH, CARD_HEIGHT, CARD_DEPTH);
+            const faceMaterial = createCardFaceMaterial(cardData);
+            const backMaterial = createCardBackMaterial();
+            const sideMaterial = new THREE.MeshStandardMaterial({ color: 0xe2e8f0 });
+            const materials = [
+                sideMaterial, sideMaterial,
+                sideMaterial, sideMaterial,
+                isFaceDown ? backMaterial : faceMaterial,
+                isFaceDown ? faceMaterial : backMaterial
+            ];
+            const mesh = new THREE.Mesh(geometry, materials);
+            mesh.userData = cardData;
+            mesh.castShadow = true;
+            return mesh;
+        }
+
+        function createCardFaceMaterial(cardData) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 360;
+            const context = canvas.getContext('2d');
+            context.fillStyle = '#f7fafc';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            context.strokeStyle = '#cbd5e0';
+            context.lineWidth = 2;
+            context.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+            context.font = 'bold 54px Segoe UI, sans-serif';
+            context.fillStyle = (cardData.suit === '♥' || cardData.suit === '♦') ? '#e53e3e' : '#1a202c';
+            const rankText = cardData.rank === '10' ? '10' : cardData.rank;
+            context.fillText(rankText, 20, 65);
+            context.fillText(cardData.suit, 20, 130);
+            context.save();
+            context.translate(canvas.width, canvas.height);
+            context.rotate(Math.PI);
+            context.fillText(rankText, 20, 65);
+            context.fillText(cardData.suit, 20, 130);
+            context.restore();
+            const texture = new THREE.CanvasTexture(canvas);
+            return new THREE.MeshStandardMaterial({ map: texture });
+        }
+
+        function createCardBackMaterial() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 360;
+            const context = canvas.getContext('2d');
+            const grad = context.createLinearGradient(0, 0, 0, 360);
+            grad.addColorStop(0, '#4c51bf');
+            grad.addColorStop(1, '#2b6cb0');
+            context.fillStyle = grad;
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            context.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            context.lineWidth = 15;
+            context.strokeRect(0, 0, canvas.width, canvas.height);
+            context.beginPath();
+            context.arc(canvas.width / 2, canvas.height / 2, 80, 0, Math.PI * 2);
+            context.fillStyle = 'rgba(255, 255, 255, 0.05)';
+            context.fill();
+            const texture = new THREE.CanvasTexture(canvas);
+            return new THREE.MeshStandardMaterial({ map: texture });
+        }
+
+        /** [REVISED] This function lays out cards in a hand. The player's hand is now a more natural,
+         * fuller-looking fan with consistent spacing and a slight vertical curve. */
+        function reorganizeHand(hand, group, isComputer, sort = true) {
+            const numCards = hand.length;
+            
+            if (!isComputer) {
+                if (sort) {
+                    hand.sort((a,b) => {
+                        const suitOrder = '♠♥♦♣';
+                        const rankOrder = 'A23456789TJQK'.replace('T', '10');
+                        if (a.suit !== b.suit) return suitOrder.indexOf(a.suit) - suitOrder.indexOf(b.suit);
+                        return rankOrder.indexOf(a.rank) - rankOrder.indexOf(b.rank);
+                    });
+                }
+
+                // Define the properties of the player's hand fan.
+                const anglePerCard = 0.07; // Radians (~4 deg), controls spacing.
+                const handRadius = 55;     // A larger radius for a broader arc.
+                const arcCenterZ = 68;     // Adjusted to match new radius.
+                const verticalSpread = 0.5;// How much higher the edge cards are.
+
+                const totalFanAngle = (numCards - 1) * anglePerCard;
+                const startAngle = -totalFanAngle / 2;
+
+                hand.forEach((cardData, i) => {
+                    const cardMesh = group.children.find(c => c.userData.id === cardData.id);
+                    if (!cardMesh || cardMesh === draggedCard) return;
+
+                    const angle = startAngle + i * anglePerCard;
+                    
+                    // Creates a "smile" shape for the hand's vertical position.
+                    const normalizedAngle = totalFanAngle > 0 ? angle / (totalFanAngle / 2) : 0;
+                    const yOffset = verticalSpread * (1 - Math.cos(normalizedAngle * Math.PI / 2));
+
+                    const targetPosition = new THREE.Vector3(
+                        handRadius * Math.sin(angle),
+                        TABLE_Y + 0.2 + yOffset, // Add the vertical offset
+                        arcCenterZ - handRadius * Math.cos(angle)
+                    );
+                    
+                    const targetRotation = new THREE.Euler(-Math.PI / 2.4, -angle, 0);
+
+                    new TWEEN.Tween(cardMesh.position)
+                        .to(targetPosition, 500)
+                        .easing(TWEEN.Easing.Quadratic.Out)
+                        .start();
+                    
+                    new TWEEN.Tween(cardMesh.rotation)
+                        .to({x: targetRotation.x, y: targetRotation.y, z: targetRotation.z}, 500)
+                        .easing(TWEEN.Easing.Quadratic.Out)
+                        .start();
+                });
+
+            } else {
+                // Computer hand layout (arc at the back)
+                const fanAngle = Math.PI / 8;
+                const angleStep = numCards > 1 ? fanAngle / (numCards - 1) : 0;
+                const startAngle = -fanAngle / 2;
+                const handRadius = 25;
+
+                hand.forEach((cardData, i) => {
+                    const cardMesh = group.children.find(c => c.userData.id === cardData.id);
+                    if (!cardMesh) return;
+
+                    const angle = startAngle + i * angleStep;
+                    
+                    const targetPosition = new THREE.Vector3(
+                        handRadius * Math.sin(angle),
+                        TABLE_Y + 0.1,
+                        -handRadius * Math.cos(angle)
+                    );
+                    const targetRotation = new THREE.Euler(-Math.PI / 2, 0, -angle); 
+
+                    new TWEEN.Tween(cardMesh.position)
+                        .to(targetPosition, 500)
+                        .easing(TWEEN.Easing.Quadratic.Out)
+                        .start();
+                    
+                    new TWEEN.Tween(cardMesh.rotation)
+                        .to({x: targetRotation.x, y: targetRotation.y, z: targetRotation.z}, 500)
+                        .easing(TWEEN.Easing.Quadratic.Out)
+                        .start();
+                });
+            }
+        }
+
+        function updateUI() {
+            const canDraw = isPlayerTurn && !playerHasDrawn;
+            drawDeckBtn.disabled = !canDraw;
+            drawDiscardBtn.disabled = !canDraw || discardPile.length === 0;
+
+            if (isPlayerTurn && playerHasDrawn) {
+                 const { deadwoodValue } = analyzeHand(playerHand);
+                 knockBtn.style.display = deadwoodValue <= 10 ? 'inline-block' : 'none';
+            } else {
+                knockBtn.style.display = 'none';
+            }
+        }
+
+        function updateScoreboard() {
+            playerScoreEl.textContent = playerScore;
+            computerScoreEl.textContent = computerScore;
+        }
+
+        function showMessage(text, duration) {
+            messageBox.innerHTML = text;
+            messageBox.style.display = 'block';
+            if (duration) {
+                setTimeout(() => {
+                    messageBox.style.display = 'none';
+                }, duration);
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onMouseDown(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            mouseDownPos.x = event.clientX;
+            mouseDownPos.y = event.clientY;
+            hasDragged = false;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(playerHandGroup.children);
+
+            if (intersects.length > 0) {
+                if (isPlayerTurn) {
+                    isDragging = true;
+                    draggedCard = intersects[0].object;
+                    dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), draggedCard.position);
+                }
+            }
+        }
+
+        function onMouseMove(event) {
+            if (!isDragging || !draggedCard) return;
+
+            const deltaX = Math.abs(event.clientX - mouseDownPos.x);
+            const deltaY = Math.abs(event.clientY - mouseDownPos.y);
+            if (deltaX > 5 || deltaY > 5) {
+                hasDragged = true;
+            }
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            raycaster.ray.intersectPlane(dragPlane, dragIntersection);
+            
+            draggedCard.position.set(dragIntersection.x, dragIntersection.y + 1, dragIntersection.z);
+        }
+
+        function onMouseUp(event) {
+            if (isDragging && draggedCard) { // Mouse was pressed on a card in the player's hand
+                if (hasDragged) {
+                    // Drag-and-drop to reorder
+                    const cardData = draggedCard.userData;
+                    const oldIndex = playerHand.findIndex(c => c.id === cardData.id);
+                    if (oldIndex > -1) playerHand.splice(oldIndex, 1);
+                    
+                    let newIndex = playerHand.length;
+                    for (let i = 0; i < playerHand.length; i++) {
+                        const otherCardMesh = playerHandGroup.children.find(m => m.userData.id === playerHand[i].id);
+                        if (otherCardMesh && draggedCard.position.x < otherCardMesh.position.x) {
+                            newIndex = i;
+                            break;
+                        }
+                    }
+                    playerHand.splice(newIndex, 0, cardData);
+                    reorganizeHand(playerHand, playerHandGroup, false, false);
+                } else {
+                    // Simple click to discard
+                    playerDiscard(draggedCard);
+                }
+            } else if (!hasDragged) { // A simple click on something other than a hand card
+                mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+
+                // Check for tap on Deck
+                if (raycaster.intersectObjects(deckGroup.children).length > 0) {
+                    playerDrawFromDeck();
+                }
+                // Check for tap on Discard Pile
+                else if (raycaster.intersectObjects(discardPileGroup.children).length > 0) {
+                    playerDrawFromDiscard();
+                }
+            }
+            
+            isDragging = false;
+            draggedCard = null;
+            hasDragged = false;
+        }
+
+        function animate(time) {
+            requestAnimationFrame(animate);
+            TWEEN.update(time);
+            renderer.render(scene, camera);
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
