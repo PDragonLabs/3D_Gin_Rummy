@@ -1,15 +1,9 @@
 # 3D_Gin_Rummy
-3D Gin Rummy
-
-
  
-
-
-3D Gin Rummy
-
+ 
 Welcome to 3D Gin Rummy! This is a classic card game brought to life in a 3D environment, running entirely in your web browser. Play a single-player game against a computer AI, and enjoy the immersive experience built with HTML, CSS, and the power of Three.js.
 
-![A screenshot of the Gin Rummy game in action.](./Screenshot 2025-07-25 at 13-14-05 3D Gin Rummy.png)
+![A screenshot of the Gin Rummy game in action.](./ScreenshotRummy.png)
 
 
 Features
